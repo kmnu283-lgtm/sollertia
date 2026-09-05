@@ -1,1 +1,3 @@
-# manus-lite
+# Manus-Lite
+
+Built with AI.
