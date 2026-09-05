@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Manus-Lite</title>
+<style>
+  body { font-family: sans-serif; margin: 0; display: flex; height: 100vh; background: #0f1117; color: #e6e6e6; }
+  #left { width: 380px; padding: 16px; display: flex; flex-direction: column; border-right: 1px solid #222; }
+  #log { flex: 1; overflow-y: auto; font-size: 13px; line-height: 1.5; }
+  #screen { flex: 1; display: flex; align-items: center; justify-content: center; background: #000; }
+  #screen img { max-width: 100%; max-height: 100%; }
+  input, select, button, textarea { margin: 4px 0; padding: 8px; border-radius: 6px; border: 1px solid #333; background: #1a1d26; color: #eee; }
+  button { cursor: pointer; }
+  .row { display: flex; gap: 6px; }
+  .thought { color: #8ab4ff; } .action { color: #7ee787; } .obs { color: #999; }
+  #approveBox { display: none; background: #2a2113; padding: 8px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<div id="left">
+  <h3>Manus-Lite</h3>
+  <select id="provider">
+    <option value="openrouter">OpenRouter</option>
+    <option value="gemini">Gemini</option>
+  </select>
+  <input id="apiKey" type="password" placeholder="API key (not saved)">
+  <input id="model" placeholder="model (e.g. google/gemini-2.5-flash)">
+  <textarea id="task" rows="2" placeholder="What should the agent do?"></textarea>
+  <div class="row">
+    <button onclick="start()">▶ Run</button>
+    <button onclick="stop()">⏹ Stop</button>
+    <label><input type="checkbox" id="approval" onchange="toggleApproval()"> Approval mode</label>
+  </div>
+  <div id="approveBox">
+    <div id="approveText"></div>
+    <button onclick="approve(true)">✅ Approve</button>
+    <button onclick="approve(false)">❌ Reject</button>
+  </div>
+  <div id="log"></div>
+</div>
+<div id="screen"><span style="color:#444">Live screen will appear here</span></div>
+
+<script>
+let ws;
+function log(html, cls) {
+  const d = document.getElementById('log');
+  d.innerHTML += `<div class="${cls||''}">${html}</div>`;
+  d.scrollTop = d.scrollHeight;
+}
+function start() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => ws.send(JSON.stringify({
+    type: "task", task: task.value, provider: provider.value,
+    apiKey: apiKey.value, model: model.value || "google/gemini-2.5-flash"
+  }));
+  ws.onmessage = e => handle(JSON.parse(e.data));
+}
+function handle(ev) {
+  if (ev.type === "thought") log("🧠 " + ev.content, "thought");
+  if (ev.type === "action") log("🛠 " + ev.action + " " + JSON.stringify(ev.args), "action");
+  if (ev.type === "observation") log("👁 " + ev.content.slice(0,120) + "…", "obs");
+  if (ev.type === "screenshot") document.getElementById('screen').innerHTML =
+      `<img src="data:image/png;base64,${ev.data}">`;
+  if (ev.type === "final") log("✅ " + ev.content, "thought");
+  if (ev.type === "stopped") log("⏹ Stopped by user");
+  if (ev.type === "error") log("⚠️ " + ev.content);
+  if (ev.type === "approval_request") {
+    approveText.textContent = `Agent wants to run: ${ev.action} ${JSON.stringify(ev.args)}`;
+    approveBox.style.display = "block";
+  }
+}
+function stop() { ws.send(JSON.stringify({type:"stop"})); }
+function approve(ok) { ws.send(JSON.stringify({type:"approve", approved: ok})); approveBox.style.display="none"; }
+function toggleApproval() { if (ws) ws.send(JSON.stringify({type:"approval_mode", on: approval.checked})); }
+</script>
+</body>
+</html>
