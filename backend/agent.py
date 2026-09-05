@@ -1,18 +1,26 @@
 import json, asyncio
 from llm import LLM
 from browser_tool import Browser
+from planner import Planner
 
-MAX_STEPS = 20
+MAX_STEPS = 30
 SYSTEM_PROMPT = """You are Sollertia, an advanced autonomous web agent. You browse the web and complete the user's task with precision.
 
 You have access to browser tools that let you navigate, click, type, extract content, scroll, and more. After each action you'll see a screenshot and list of interactive elements.
 
 Guidelines:
 - Think step by step before acting
+- When you receive a complex task, first create a numbered plan with clear steps
 - Use screenshots to verify your actions
 - When the task is complete, reply with a clear final summary and stop calling tools
 - If you encounter an error or can't proceed, explain the situation
-- Be efficient but thorough"""
+- Be efficient but thorough
+- Update your progress as you complete each step
+
+Tool calling:
+- Use tools by calling them with the appropriate arguments
+- After each tool call, you'll receive feedback including screenshots and page content
+- Use this feedback to decide your next action"""
 
 def tool(name, desc, props, required):
     return {"type": "function", "function": {"name": name, "description": desc, "parameters": {"type": "object", "properties": props, "required": required}}}
@@ -25,16 +33,19 @@ TOOLS = [
     tool("browser_scroll", "Scroll the page up or down", {"direction": {"type": "string", "enum": ["up", "down"]}, "pixels": {"type": "integer", "default": 500}}, ["direction"]),
     tool("browser_back", "Go back to the previous page", {}, []),
     tool("browser_wait", "Wait for a number of seconds (useful for loading)", {"seconds": {"type": "number", "default": 2}}, []),
+    tool("update_progress", "Update your current progress on the plan", {"step": {"type": "integer", "description": "Current step number (1-based)"}, "status": {"type": "string", "enum": ["in_progress", "completed"]}, "notes": {"type": "string", "description": "Optional notes about what was accomplished"}}, ["step", "status"]),
 ]
 
 class Agent:
     def __init__(self, provider, api_key, model):
         self.llm = LLM(provider, api_key, model)
         self.browser = Browser()
+        self.planner = Planner()
         self.stop_requested = False
         self.require_approval = False
         self.approved = True
         self.approval_event = asyncio.Event()
+        self.step_count = 0
 
     async def _execute(self, name, args):
         try:
@@ -56,6 +67,13 @@ class Agent:
                 seconds = args.get("seconds", 2)
                 await asyncio.sleep(seconds)
                 return await self.browser.snapshot()
+            if name == "update_progress":
+                step = args.get("step", self.step_count)
+                status = args.get("status", "in_progress")
+                notes = args.get("notes", "")
+                self.planner.update_step(step, status, notes)
+                self.step_count = step
+                return {"progress": self.planner.get_progress(), "plan": self.planner.plan}
             return {"error": f"Unknown tool {name}"}
         except Exception as e:
             return {"error": str(e)}
@@ -85,6 +103,20 @@ class Agent:
         await self.browser.start()
         messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": task}]
         
+        # Initial planning phase
+        planning_msg = f"Task: {task}\n\nFirst, create a numbered plan with clear steps to complete this task. List each step on a new line starting with a number."
+        messages.append({"role": "user", "content": planning_msg})
+        
+        plan_response = await self.llm.chat(messages, tools=None)
+        if plan_response.get("content"):
+            # Try to extract plan from response
+            self.planner.create_plan(task, plan_response["content"])
+            if self.planner.plan:
+                yield {"type": "plan", "plan": self.planner.plan, "content": plan_response["content"]}
+                messages.append(plan_response)
+                # Now proceed with execution
+                messages.append({"role": "user", "content": "Great plan! Now execute it step by step. Start with step 1."})
+        
         for step in range(MAX_STEPS):
             if self.stop_requested:
                 yield {"type": "stopped"}
@@ -95,17 +127,18 @@ class Agent:
             
             if msg.get("content"):
                 yield {"type": "thought", "content": msg["content"]}
+                self.planner.add_to_history("thought", msg["content"])
             
             calls = msg.get("tool_calls")
             if not calls:
-                yield {"type": "final", "content": msg.get("content", "Task complete.")}
+                yield {"type": "final", "content": msg.get("content", "Task complete."), "plan": self.planner.plan}
                 break
             
             for tc in calls:
                 fn = tc["function"]["name"]
                 args = json.loads(tc["function"]["arguments"] or "{}")
                 
-                if self.require_approval:
+                if self.require_approval and fn != "update_progress":
                     self.approval_event.clear()
                     yield {"type": "approval_request", "action": fn, "args": args}
                     await self.approval_event.wait()
@@ -113,7 +146,7 @@ class Agent:
                         messages.append({"role": "tool", "tool_call_id": tc["id"], "content": "User rejected this action."})
                         continue
                 
-                yield {"type": "action", "action": fn, "args": args}
+                yield {"type": "action", "action": fn, "args": args, "plan": self.planner.plan}
                 result = await self._execute(fn, args)
                 
                 if isinstance(result, dict):
@@ -128,6 +161,9 @@ class Agent:
                         obs = f"Page content (first 1500 chars): {result['text'][:1500]}"
                     elif "error" in result:
                         obs = f"Error: {result['error']}"
+                    elif "progress" in result:
+                        obs = f"Progress updated: {result['progress']:.1f}% complete"
+                        yield {"type": "plan_update", "plan": self.planner.plan, "progress": result['progress']}
                     else:
                         obs = str(result)[:1000]
                 else:
@@ -135,5 +171,7 @@ class Agent:
                 
                 yield {"type": "observation", "content": obs}
                 messages.append({"role": "tool", "tool_call_id": tc["id"], "content": obs})
+                self.planner.add_to_history("observation", obs)
         
         await self.browser.close()
+        yield {"type": "session_summary", "summary": self.planner.to_dict()}
