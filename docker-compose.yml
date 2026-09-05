@@ -1,0 +1,14 @@
+version: '3.8'
+services:
+  sollertia:
+    build: .
+    ports:
+      - '8000:8000'
+    environment:
+      - SOLLERTIA_PROVIDER=openrouter
+      - SOLLERTIA_MODEL=google/gemini-2.5-flash
+      - SOLLERTIA_MAX_STEPS=30
+    volumes:
+      - ./sessions:/app/sessions
+      - ./artifacts:/app/backend/artifacts
+    restart: unless-stopped
