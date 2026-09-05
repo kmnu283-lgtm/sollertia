@@ -1,41 +1,57 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from agent import Agent
 import asyncio
+import os
 
 app = FastAPI()
+agent_instance = None
 
-@app.get("/")
-def index():
-    return FileResponse("../frontend/index.html")
+@app.get("/", response_class=HTMLResponse)
+async def index():
+    html_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "index.html")
+    with open(html_path) as f:
+        return HTMLResponse(content=f.read(), status_code=200)
 
 @app.websocket("/ws")
 async def ws(websocket: WebSocket):
+    global agent_instance
     await websocket.accept()
-    state = {"agent": None}
-
-    async def runner(task, provider, api_key, model):
-        agent = Agent(provider, api_key, model)
-        state["agent"] = agent
-        try:
-            async for event in agent.run(task):
-                await websocket.send_json(event)
-        except Exception as e:
-            await websocket.send_json({"type": "error", "content": str(e)})
-
+    
     try:
         while True:
             data = await websocket.receive_json()
             t = data.get("type")
+            
             if t == "task":
-                asyncio.create_task(runner(data["task"], data["provider"], data["apiKey"], data["model"]))
-            elif t == "stop" and state["agent"]:
-                state["agent"].stop_requested = True
-            elif t == "approve" and state["agent"]:
-                state["agent"].approved = data["approved"]
-                state["agent"].approval_event.set()
-            elif t == "approval_mode" and state["agent"]:
-                state["agent"].require_approval = data["on"]
+                agent_instance = Agent(data["provider"], data["apiKey"], data["model"])
+                
+                async def runner():
+                    try:
+                        async for event in agent_instance.run(data["task"]):
+                            await websocket.send_json(event)
+                    except Exception as e:
+                        await websocket.send_json({"type": "error", "content": str(e)})
+                
+                asyncio.create_task(runner())
+            
+            elif t == "stop" and agent_instance:
+                agent_instance.stop_requested = True
+            
+            elif t == "approve" and agent_instance:
+                agent_instance.approved = data["approved"]
+                agent_instance.approval_event.set()
+            
+            elif t == "approval_mode" and agent_instance:
+                agent_instance.require_approval = data["on"]
+            
+            elif t == "manual" and agent_instance:
+                result = await agent_instance.manual_command(data["cmd"])
+                if result:
+                    await websocket.send_json({"type": "observation", "content": f"Manual: {result}"})
+                    if "screenshot" in result:
+                        await websocket.send_json({"type": "screenshot", "data": result["screenshot"]})
+    
     except WebSocketDisconnect:
-        if state["agent"]:
-            await state["agent"].browser.close()
+        if agent_instance:
+            await agent_instance.browser.close()
