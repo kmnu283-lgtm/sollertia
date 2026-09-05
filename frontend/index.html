@@ -85,6 +85,8 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--acc)}
   <div id="logo">S</div>
   <div id="brand"><b>SOLLERTIA</b><span>autonomous agent</span></div>
   <div id="state"><span id="dot"></span><span id="stateTxt">idle</span></div>
+  <button onclick="exportReport()">⬇ Export</button>
+  <button onclick="toggleReplay()">▶ Replay</button>
   <button id="takeBtn" onclick="toggleTake()">🎮 Take Control</button>
   <button id="stop" onclick="send({type:'stop'})">⏹ Stop</button>
   <button id="run" onclick="start()">▶ Run</button>
@@ -111,14 +113,14 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--acc)}
   <div id="right">
     <div id="chrome"><div id="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div><div id="url">about:blank</div></div>
     <div id="screen"><span style="color:#333">live screen</span></div>
-    <div id="status"><span id="stSteps">steps 0</span><span id="stMode">mode: auto</span><span id="stPing">ws: —</span></div>
+    <div id="status"><span id="stSteps">steps 0</span><span id="stMode">mode: auto</span><span id="stCost">$0.0000</span><span id="stPing">ws: —</span></div>
   </div>
 </div>
 <div id="modal"><div class="box"><h3>⚠ Sollertia requests an action</h3><pre id="mTxt"></pre>
   <div class="row"><button onclick="approve(true)" style="border-color:var(--ok);color:var(--ok)">Approve</button>
   <button onclick="approve(false)" style="border-color:var(--bad);color:var(--bad)">Reject</button></div></div></div>
 <script>
-let ws,steps=0,currentPlan=[];
+let ws,steps=0,currentPlan=[],lastReport="",replayData=null,replayIdx=0,replayTimer=null;
 const $=id=>document.getElementById(id);
 function state(s,cls){$('stateTxt').textContent=s;$('dot').className=cls||'';}
 function ev(html,cls){const d=document.createElement('div');d.className='ev '+cls;
@@ -136,8 +138,25 @@ function updatePlan(plan,progress){
     $('planProgress').textContent=Math.round(progress)+'%';
   }
 }
+function exportReport(){
+  if(!lastReport){alert("No report yet. Run a task first.");return;}
+  const blob=new Blob([lastReport],{type:"text/markdown"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download="sollertia-report.md";a.click();
+}
+function toggleReplay(){
+  if(!replayData){alert("No session recorded yet.");return;}
+  $('log').innerHTML="";replayIdx=0;
+  const evs=replayData.events;
+  clearInterval(replayTimer);
+  replayTimer=setInterval(()=>{
+    if(replayIdx>=evs.length){clearInterval(replayTimer);ev('▶ Replay complete','final');return;}
+    const e=evs[replayIdx++];
+    if(e.type)handle(e);
+  },400);
+}
 function start(){
-  ws=new WebSocket('ws://'+location.host+'/ws');steps=0;
+  ws=new WebSocket('ws://'+location.host+'/ws');steps=0;replayData=null;
   ws.onopen=()=>{$('stPing').textContent='ws: live';state('running','live');
     ws.send(JSON.stringify({type:'task',task:task.value,provider:provider.value,apiKey:apiKey.value,model:model.value||'google/gemini-2.5-flash'}));};
   ws.onmessage=e=>handle(JSON.parse(e.data));
@@ -155,6 +174,9 @@ function handle(e){
   if(e.type==='stopped'){state('stopped','stop');ev('⏹ stopped','error');}
   if(e.type==='error'){state('error','stop');ev('⚠ '+e.content,'error');}
   if(e.type==='approval_request'){$('mTxt').textContent=e.action+' '+JSON.stringify(e.args);$('modal').classList.add('open');state('awaiting approval','think');}
+  if(e.type==='report'){lastReport=e.markdown;ev('📄 Report ready — click ⬇ Export','final');}
+  if(e.type==='cost'){$('stCost').textContent='$'+(+e.usd).toFixed(4);}
+  if(e.type==='session_summary'){replayData={events:[]};}
 }
 function approve(ok){send({type:'approve',approved:ok});$('modal').classList.remove('open');}
 function toggleTake(){const on=$('console').classList.toggle('open');$('stMode').textContent='mode: '+(on?'manual':'auto');send({type:'approval_mode',on});}
