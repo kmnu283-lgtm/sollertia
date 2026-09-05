@@ -9,14 +9,23 @@ class LLM:
         self.model = model
 
     async def chat(self, messages, tools=None):
-        if self.provider == "openrouter": return await self._openrouter(messages, tools)
-        if self.provider == "gemini": return await self._gemini(messages)
+        if self.provider == "openrouter":
+            return await self._openrouter(messages, tools)
+        if self.provider == "gemini":
+            return await self._gemini(messages)
         raise ValueError(f"Unknown provider: {self.provider}")
 
     async def _openrouter(self, messages, tools=None):
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", "HTTP-Referer": "http://localhost:8000", "X-Title": "Manus-Lite"}
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://localhost:8000",
+            "X-Title": "Sollertia",
+        }
         payload = {"model": self.model, "messages": messages}
-        if tools: payload["tools"] = tools; payload["tool_choice"] = "auto"
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
         async with httpx.AsyncClient(timeout=180) as c:
             r = await c.post(OPENROUTER_URL, headers=headers, json=payload)
             r.raise_for_status()
