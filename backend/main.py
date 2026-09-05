@@ -1,5 +1,5 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import HTMLResponse
 from agent import Agent
 import asyncio
 import os
@@ -49,7 +49,7 @@ async def ws(websocket: WebSocket):
                 result = await agent_instance.manual_command(data["cmd"])
                 if result:
                     await websocket.send_json({"type": "observation", "content": f"Manual: {result}"})
-                    if "screenshot" in result:
+                    if isinstance(result, dict) and "screenshot" in result:
                         await websocket.send_json({"type": "screenshot", "data": result["screenshot"]})
     
     except WebSocketDisconnect:
