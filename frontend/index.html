@@ -41,6 +41,21 @@ textarea{resize:none;height:56px}
 input:focus,textarea:focus,select:focus{outline:none;border-color:var(--acc)}
 #adv{display:none;gap:8px}
 #adv.open{display:flex}
+#plan{padding:14px;border-bottom:1px solid var(--line);max-height:200px;overflow-y:auto;display:none}
+#plan.visible{display:block}
+#plan h3{font-size:12px;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+#planSteps{display:flex;flex-direction:column;gap:6px}
+.planStep{display:flex;gap:8px;align-items:flex-start;font-size:12px;padding:6px;border-radius:6px;background:var(--panel)}
+.planStep .num{font-family:var(--mono);color:var(--mut);font-weight:600;min-width:20px}
+.planStep .text{flex:1;color:var(--txt)}
+.planStep.pending .num{color:var(--mut)}
+.planStep.in_progress{border-left:2px solid var(--acc2);background:var(--panel2)}
+.planStep.in_progress .num{color:var(--acc2)}
+.planStep.completed{border-left:2px solid var(--ok);background:rgba(52,211,153,0.05)}
+.planStep.completed .num{color:var(--ok)}
+.planStep.completed .text{text-decoration:line-through;color:var(--mut)}
+#progress{height:4px;background:var(--line);border-radius:2px;margin-top:8px;overflow:hidden}
+#progressBar{height:100%;background:linear-gradient(90deg,var(--acc),var(--acc2));width:0%;transition:width .3s}
 #log{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
 .ev{border:1px solid var(--line);border-left-width:3px;border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.5;animation:in .25s ease;background:var(--panel)}
 @keyframes in{from{opacity:0;transform:translateY(6px)}}
@@ -48,6 +63,7 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--acc)}
 .ev.thought{border-left-color:var(--acc2)} .ev.action{border-left-color:var(--ok)}
 .ev.obs{border-left-color:#3a4152;color:var(--mut)} .ev.final{border-left-color:var(--acc);background:#171329}
 .ev.error{border-left-color:var(--bad)} .ev.approve{border-left-color:var(--warn)}
+.ev.plan{border-left-color:var(--acc);background:rgba(124,92,255,0.05)}
 #console{display:none;border-top:1px solid var(--line);padding:10px;background:#0a0d12}
 #console.open{display:block}
 #console input{width:100%;font-family:var(--mono);font-size:12px}
@@ -57,14 +73,12 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--acc)}
 #url{flex:1;font-family:var(--mono);font-size:12px;color:var(--mut);background:var(--panel2);border:1px solid var(--line);border-radius:99px;padding:6px 14px;white-space:nowrap;overflow:hidden}
 #screen{flex:1;position:relative;background:#000;display:grid;place-items:center;overflow:hidden}
 #screen img{max-width:100%;max-height:100%;transition:opacity .3s}
-#overlay{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
-#overlay span{background:#0009;border:1px solid var(--line);padding:8px 18px;border-radius:99px;font-family:var(--mono);font-size:12px;color:var(--acc2)}
 #status{display:flex;gap:18px;padding:8px 14px;border-top:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--mut);background:var(--panel)}
 #modal{position:fixed;inset:0;background:#000a;display:none;place-items:center;z-index:9}
 #modal.open{display:grid}
 #modal .box{width:420px;background:var(--panel);border:1px solid var(--warn);border-radius:14px;padding:18px}
 #modal h3{color:var(--warn);font-size:14px;margin-bottom:8px}
-#modal pre{font-family:var(--mono);font-size:12px;color:var(--mut);background:var(--panel2);padding:10px;border-radius:8px;overflow:auto;margin-bottom:14px}
+#modal pre{font-family:var(--mono);font-size:12px;color:var(--mut);background:var(--panel2);padding:10px;border-radius:8px;overflow:auto;margin-bottom:14px;max-height:200px}
 </style></head>
 <body>
 <div id="top">
@@ -84,14 +98,19 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--acc)}
         <button onclick="adv.classList.toggle('open')">⚙</button>
       </div>
       <div class="row" id="adv"><input id="apiKey" type="password" placeholder="API key (kept in memory only)" style="flex:1"></div>
-      <textarea id="task" placeholder="Give Sollertia a mission…"></textarea>
+      <textarea id="task" placeholder="Give Sollertia a mission..."></textarea>
+    </div>
+    <div id="plan">
+      <h3>📋 Plan <span id="planProgress" style="margin-left:auto;color:var(--acc2)">0%</span></h3>
+      <div id="planSteps"></div>
+      <div id="progress"><div id="progressBar"></div></div>
     </div>
     <div id="log"></div>
     <div id="console"><input id="cmd" placeholder="manual: goto <url> | click <sel> | type <sel> <text> | shot | back" onkeydown="if(event.key==='Enter')manual()"></div>
   </div>
   <div id="right">
     <div id="chrome"><div id="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div><div id="url">about:blank</div></div>
-    <div id="screen"><span style="color:#333">live screen</span><div id="overlay" style="display:none"><span id="ovTxt"></span></div></div>
+    <div id="screen"><span style="color:#333">live screen</span></div>
     <div id="status"><span id="stSteps">steps 0</span><span id="stMode">mode: auto</span><span id="stPing">ws: —</span></div>
   </div>
 </div>
@@ -99,11 +118,24 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--acc)}
   <div class="row"><button onclick="approve(true)" style="border-color:var(--ok);color:var(--ok)">Approve</button>
   <button onclick="approve(false)" style="border-color:var(--bad);color:var(--bad)">Reject</button></div></div></div>
 <script>
-let ws,steps=0;
+let ws,steps=0,currentPlan=[];
 const $=id=>document.getElementById(id);
 function state(s,cls){$('stateTxt').textContent=s;$('dot').className=cls||'';}
 function ev(html,cls){const d=document.createElement('div');d.className='ev '+cls;
   d.innerHTML='<span class="t">'+cls+'</span>'+html;$('log').appendChild(d);$('log').scrollTop=1e9;}
+function updatePlan(plan,progress){
+  if(!plan||!plan.length)return;
+  $('plan').classList.add('visible');
+  currentPlan=plan;
+  $('planSteps').innerHTML=plan.map(s=>{
+    let cls=s.status||'pending';
+    return '<div class="planStep '+cls+'"><span class="num">'+s.step+'</span><span class="text">'+s.action+'</span></div>';
+  }).join('');
+  if(progress!==undefined){
+    $('progressBar').style.width=progress+'%';
+    $('planProgress').textContent=Math.round(progress)+'%';
+  }
+}
 function start(){
   ws=new WebSocket('ws://'+location.host+'/ws');steps=0;
   ws.onopen=()=>{$('stPing').textContent='ws: live';state('running','live');
@@ -113,11 +145,13 @@ function start(){
 function send(o){if(ws)ws.send(JSON.stringify(o));}
 function handle(e){
   if(e.type==='thought'){state('thinking','think');ev(e.content,'thought');}
-  if(e.type==='action'){state('acting: '+e.action,'live');steps++;$('stSteps').textContent='steps '+steps;ev('🛠 '+e.action+' '+JSON.stringify(e.args),'action');}
+  if(e.type==='action'){state('acting: '+e.action,'live');steps++;$('stSteps').textContent='steps '+steps;ev('🛠 '+e.action+' '+JSON.stringify(e.args),'action');if(e.plan)updatePlan(e.plan);}
   if(e.type==='observation')ev(e.content,'obs');
   if(e.type==='url')$('url').textContent=e.url;
   if(e.type==='screenshot'){const i=new Image();i.src='data:image/png;base64,'+e.data;$('screen').innerHTML='';$('screen').appendChild(i);}
-  if(e.type==='final'){state('done','live');ev('✅ '+e.content,'final');}
+  if(e.type==='plan'){updatePlan(e.plan);ev('📋 Plan created','plan');}
+  if(e.type==='plan_update'){updatePlan(e.plan,e.progress);ev('📊 Progress: '+Math.round(e.progress)+'%','plan');}
+  if(e.type==='final'){state('done','live');ev('✅ '+e.content,'final');if(e.plan)updatePlan(e.plan,100);}
   if(e.type==='stopped'){state('stopped','stop');ev('⏹ stopped','error');}
   if(e.type==='error'){state('error','stop');ev('⚠ '+e.content,'error');}
   if(e.type==='approval_request'){$('mTxt').textContent=e.action+' '+JSON.stringify(e.args);$('modal').classList.add('open');state('awaiting approval','think');}
